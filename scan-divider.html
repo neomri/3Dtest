@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scan divider — captured view to point cloud</title>
+<style>
+  :root{
+    --bg:#101317; --panel:#171B20; --line:#262C33;
+    --ink:#E7EAED; --ink-dim:#8B949D; --ink-faint:#5C656E;
+    --teal:#1D9E75; --amber:#E8A33C;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  .page{max-width:1080px;margin:0 auto;padding:40px 24px 64px}
+
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 14px}
+  h1{font-size:clamp(24px,3.4vw,34px);line-height:1.15;font-weight:500;letter-spacing:-.02em;margin:0 0 12px}
+  .lede{font-size:16px;line-height:1.65;color:var(--ink-dim);max-width:60ch;margin:0 0 32px}
+
+  .viewer{border:1px solid var(--line);border-radius:4px;background:var(--panel);overflow:hidden}
+  .stage{position:relative;height:min(62vh,560px);min-height:320px}
+  .stage canvas{display:block;width:100%;height:100%}
+  .bar{position:absolute;top:0;bottom:0;width:1px;margin-left:-.5px;background:#fff;pointer-events:none;opacity:.9}
+  .knob{position:absolute;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;
+        background:#fff;pointer-events:none;display:grid;place-items:center}
+  .knob svg{display:block}
+  .side{position:absolute;bottom:14px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;
+        text-transform:uppercase;color:#fff;background:rgba(8,10,12,.62);padding:5px 9px;border-radius:2px;pointer-events:none}
+  .fallback{display:none;padding:48px 24px;text-align:center;color:var(--ink-dim);font-size:15px;line-height:1.6}
+
+  .grip{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;opacity:0;
+        cursor:ew-resize;-webkit-appearance:none;appearance:none;background:transparent}
+  .grip::-webkit-slider-thumb{-webkit-appearance:none;width:46px;height:1200px}
+  .grip::-moz-range-thumb{width:46px;height:1200px;border:0;opacity:0}
+  .grip:focus-visible{opacity:1;outline:2px solid var(--teal);outline-offset:-3px;background:transparent}
+
+  .hud{display:flex;flex-wrap:wrap;gap:0;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px}
+  .cell{flex:1 1 130px;padding:12px 14px;border-right:1px solid var(--line)}
+  .cell:last-child{border-right:0}
+  .cell dt{color:var(--ink-faint);letter-spacing:.14em;text-transform:uppercase;margin:0 0 5px;font-size:10px}
+  .cell dd{margin:0;color:var(--ink);font-size:13px}
+  .cell dd b{font-weight:400;color:var(--teal)}
+
+  .hint{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin:14px 0 0;letter-spacing:.04em}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;margin:28px 0 0;font-size:13px;color:var(--ink-dim)}
+  .legend span{display:flex;align-items:center;gap:8px}
+  .sw{width:9px;height:9px;border-radius:50%}
+  footer{margin-top:40px;padding-top:20px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-faint);line-height:1.7}
+</style>
+</head>
+<body>
+<div class="page">
+  <p class="eyebrow">Interactive prototype</p>
+  <h1>Captured view to point cloud, split across one frame</h1>
+  <p class="lede">Left of the divider is the space as the scanner saw it. Right of the divider is the same data as geometry, orbiting away from the capture pose. Both halves render the same points; only the camera differs.</p>
+
+  <div class="viewer">
+    <div class="stage" id="stage">
+      <span class="side" style="left:14px">Captured view</span>
+      <span class="side" style="right:14px">Point cloud</span>
+      <div class="bar" id="bar"></div>
+      <div class="knob" id="knob">
+        <svg width="15" height="10" viewBox="0 0 15 10" aria-hidden="true">
+          <path d="M4.6 1 1 5l3.6 4M10.4 1 14 5l-3.6 4" fill="none" stroke="#191D22" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <input class="grip" id="grip" type="range" min="0" max="100" value="52" step="1" aria-label="Move divider between captured view and point cloud">
+      <div class="fallback" id="fallback">
+        This prototype needs WebGL and an internet connection to load the 3D library. Try a current version of Chrome, Firefox, Safari, or Edge.
+      </div>
+    </div>
+    <dl class="hud">
+      <div class="cell"><dt>Divider</dt><dd><b id="hSplit">52</b> %</dd></div>
+      <div class="cell"><dt>Points</dt><dd id="hPts">—</dd></div>
+      <div class="cell"><dt>Orbit</dt><dd><b id="hAz">0.0</b>° az / <b id="hEl">0.0</b>° el</dd></div>
+      <div class="cell"><dt>Capture pose</dt><dd id="hPose">locked</dd></div>
+    </dl>
+  </div>
+  <p class="hint">Drag the divider · click anywhere on the frame · arrow keys · move the pointer vertically for parallax</p>
+
+  <div class="legend">
+    <span><i class="sw" style="background:#9A9791"></i> Structure — floor, walls, beams</span>
+    <span><i class="sw" style="background:#1D9E75"></i> Equipment — vessels, skid</span>
+    <span><i class="sw" style="background:#E8A33C"></i> Pipe runs</span>
+    <span><i class="sw" style="background:#fff"></i> Section cut at the divider plane</span>
+  </div>
+
+  <footer>
+    Synthetic stand-in data. In production the left half is the captured photograph and the right half is the decimated scan, both referenced to the same camera pose.
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  var stage=document.getElementById('stage'), grip=document.getElementById('grip');
+  var bar=document.getElementById('bar'), knob=document.getElementById('knob');
+  var hSplit=document.getElementById('hSplit'), hPts=document.getElementById('hPts');
+  var hAz=document.getElementById('hAz'), hEl=document.getElementById('hEl'), hPose=document.getElementById('hPose');
+
+  function fail(){
+    document.getElementById('fallback').style.display='block';
+    bar.style.display='none'; knob.style.display='none'; grip.style.display='none';
+    Array.prototype.forEach.call(document.querySelectorAll('.side'),function(n){n.style.display='none';});
+  }
+  if(!window.THREE){ fail(); return; }
+
+  var P=[],C=[];
+  function add(x,y,z,r,g,b){P.push(x,y,z);C.push(r,g,b);}
+  function R(){return Math.random();}
+  function n(a){return 1+(R()-0.5)*a;}
+  function slab(c,x0,x1,y0,y1,z0,z1,r,g,b,v){
+    for(var i=0;i<c;i++){var k=n(v);add(x0+(x1-x0)*R(),y0+(y1-y0)*R(),z0+(z1-z0)*R(),r*k,g*k,b*k);}
+  }
+  function vessel(c,cx,cz,rad,y0,y1,r,g,b){
+    for(var i=0;i<c;i++){var t=R()*6.2832,k=n(0.16);
+      add(cx+Math.cos(t)*rad,y0+(y1-y0)*R(),cz+Math.sin(t)*rad,r*k,g*k,b*k);}
+  }
+  function run(c,cx,cy,rad,z0,z1,r,g,b){
+    for(var i=0;i<c;i++){var t=R()*6.2832,k=n(0.16);
+      add(cx+Math.cos(t)*rad,cy+Math.sin(t)*rad,z0+(z1-z0)*R(),r*k,g*k,b*k);}
+  }
+  var S=[0.605,0.592,0.568], E=[0.114,0.620,0.459], A=[0.910,0.640,0.235];
+  slab(22000,-5,5,0,0,-9,1.2,S[0],S[1],S[2],0.26);
+  slab(10000,-5,-5,0,3.6,-9,1.2,S[0]*0.9,S[1]*0.9,S[2]*0.9,0.2);
+  slab(10000,5,5,0,3.6,-9,1.2,S[0]*0.9,S[1]*0.9,S[2]*0.9,0.2);
+  slab(9000,-5,5,0,3.6,-9,-9,S[0]*0.84,S[1]*0.84,S[2]*0.84,0.2);
+  for(var i=0;i<5;i++){ slab(2000,-5,5,3.42,3.58,-8.2+i*1.9,-7.9+i*1.9,S[0]*1.12,S[1]*1.12,S[2]*1.12,0.14); }
+  vessel(6000,-2.6,-5.2,0.72,0,2.7,E[0],E[1],E[2]);
+  vessel(6000,2.9,-6.4,0.72,0,2.7,E[0],E[1],E[2]);
+  vessel(4800,0.4,-7.6,0.58,0,2.2,E[0],E[1],E[2]);
+  run(3800,-3.6,3.05,0.13,-9,1.2,A[0],A[1],A[2]);
+  run(3800,-3.1,3.05,0.13,-9,1.2,A[0],A[1],A[2]);
+  run(3800,3.4,2.85,0.13,-9,1.2,A[0],A[1],A[2]);
+  slab(7000,-5,5,2.55,3.05,-3.9,-3.3,S[0]*1.06,S[1]*1.06,S[2]*1.06,0.16);
+  slab(6000,-2.7,-0.3,0,0.95,-2.6,-1.2,E[0]*0.72,E[1]*0.72,E[2]*0.72,0.18);
+  slab(3400,1.6,3.2,0,1.7,-1.4,-0.6,S[0]*0.78,S[1]*0.78,S[2]*0.78,0.18);
+  hPts.textContent=(P.length/3).toLocaleString();
+
+  var geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(P),3));
+  geo.setAttribute('aColor',new THREE.BufferAttribute(new Float32Array(C),3));
+
+  var VS=['attribute vec3 aColor;',
+  'uniform float uSize; uniform float uDpr; uniform mat4 uCanon; uniform float uSplitNdc;',
+  'varying vec3 vColor; varying float vCut;',
+  'void main(){',
+  ' vec4 mv=modelViewMatrix*vec4(position,1.0);',
+  ' gl_Position=projectionMatrix*mv;',
+  ' gl_PointSize=max(1.3,uSize*uDpr/max(-mv.z,0.001));',
+  ' vec4 cp=uCanon*vec4(position,1.0);',
+  ' float cx=cp.w>0.0?cp.x/cp.w:99.0;',
+  ' vCut=1.0-smoothstep(0.0,0.030,abs(cx-uSplitNdc));',
+  ' vColor=aColor;',
+  '}'].join('\n');
+  var FS=['varying vec3 vColor; varying float vCut;',
+  'void main(){',
+  ' vec2 d=gl_PointCoord-0.5; float r=dot(d,d);',
+  ' if(r>0.25) discard;',
+  ' float a=smoothstep(0.25,0.14,r);',
+  ' gl_FragColor=vec4(mix(vColor,vec3(1.0),vCut*0.62),a);',
+  '}'].join('\n');
+
+  var dpr=Math.min(window.devicePixelRatio||1,2);
+  var mat=new THREE.ShaderMaterial({vertexShader:VS,fragmentShader:FS,transparent:true,
+    depthTest:true,depthWrite:true,
+    uniforms:{uSize:{value:5.0},uDpr:{value:dpr},uCanon:{value:new THREE.Matrix4()},uSplitNdc:{value:0.04}}});
+  var scene=new THREE.Scene();
+  scene.add(new THREE.Points(geo,mat));
+
+  var PIV=new THREE.Vector3(0,1.5,-3), D0=9.5, AZ=-0.40, EL=0.32;
+  function place(cam,rev,yaw){
+    var az=AZ*rev+yaw*0.10*rev, el=EL*rev, d=D0+2.8*rev;
+    cam.position.set(PIV.x+Math.sin(az)*Math.cos(el)*d, PIV.y+Math.sin(el)*d,
+                     PIV.z+Math.cos(az)*Math.cos(el)*d);
+    cam.lookAt(PIV); cam.updateMatrixWorld();
+    return [az,el];
+  }
+  var camA=new THREE.PerspectiveCamera(46,1,0.05,90);
+  var camB=new THREE.PerspectiveCamera(46,1,0.05,90);
+
+  var renderer;
+  try{ renderer=new THREE.WebGLRenderer({antialias:true,alpha:true}); }
+  catch(e){ fail(); return; }
+  renderer.setClearColor(0x000000,0); renderer.autoClear=false;
+  stage.appendChild(renderer.domElement);
+
+  var W=1,H=1;
+  function resize(){
+    W=stage.clientWidth; H=stage.clientHeight;
+    renderer.setPixelRatio(dpr); renderer.setSize(W,H,false);
+    camA.aspect=W/H; camA.updateProjectionMatrix();
+    camB.aspect=W/H; camB.updateProjectionMatrix();
+  }
+  resize(); window.addEventListener('resize',resize);
+
+  var split=0.52, tgt=0.52, yaw=0, yawT=0;
+  grip.addEventListener('input',function(){ tgt=grip.value/100; });
+  stage.addEventListener('pointermove',function(e){
+    var r=stage.getBoundingClientRect(); yawT=((e.clientY-r.top)/r.height-0.5)*-2; });
+  stage.addEventListener('pointerleave',function(){ yawT=0; });
+  var reduce=window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var cm=new THREE.Matrix4(), DEG=180/Math.PI;
+  function frame(){
+    split+=(tgt-split)*(reduce?1:0.16);
+    yaw+=(yawT-yaw)*0.07;
+    var rev=1-split;
+
+    place(camA,0,0);
+    cm.multiplyMatrices(camA.projectionMatrix,camA.matrixWorldInverse);
+    mat.uniforms.uCanon.value.copy(cm);
+    mat.uniforms.uSplitNdc.value=split*2-1;
+    var ang=place(camB,rev,yaw);
+
+    bar.style.left=(split*100)+'%'; knob.style.left=(split*100)+'%';
+    hSplit.textContent=Math.round(split*100);
+    hAz.textContent=(ang[0]*DEG).toFixed(1);
+    hEl.textContent=(ang[1]*DEG).toFixed(1);
+    hPose.textContent = rev<0.01 ? 'aligned' : 'offset';
+
+    renderer.clear();
+    renderer.setScissorTest(true);
+    renderer.setViewport(0,0,W,H);
+    renderer.setScissor(0,0,Math.max(0,W*split),H);
+    renderer.render(scene,camA);
+    renderer.clearDepth();
+    renderer.setScissor(Math.max(0,W*split),0,Math.max(0,W*(1-split)),H);
+    renderer.render(scene,camB);
+    renderer.setScissorTest(false);
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+</script>
+</body>
+</html>
